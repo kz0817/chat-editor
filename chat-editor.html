@@ -75,6 +75,7 @@
     }
 
     .actions {
+      position: relative;
       display: flex;
       gap: 7px;
     }
@@ -107,6 +108,23 @@
     }
 
     .clear { color: var(--danger); }
+
+    .key-help { align-self: center; }
+    .key-help summary { cursor: pointer; font-size: 0.875rem; }
+    .key-help .key-list {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      z-index: 1;
+      width: min(310px, calc(100vw - 24px));
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      font-size: 0.875rem;
+      line-height: 1.8;
+    }
 
     textarea {
       width: 100%;
@@ -167,6 +185,18 @@
     <header class="toolbar">
       <h1 class="title">Chat Editor</h1>
       <div class="actions" aria-label="編集操作">
+        <details class="key-help">
+          <summary>キー操作</summary>
+          <div class="key-list">
+            <kbd>Ctrl+F</kbd> / <kbd>Ctrl+B</kbd> 次／前の文字<br>
+            <kbd>Ctrl+A</kbd> / <kbd>Ctrl+E</kbd> 行頭／行末<br>
+            <kbd>Ctrl+P</kbd> / <kbd>Ctrl+N</kbd> 前／次の行<br>
+            F / B / E / P / N は Shift 併用で範囲選択できます。行は改行で区切ります。<br>
+            <kbd>Ctrl+Shift+A</kbd> 全選択<br>
+            <kbd>Ctrl+Enter</kbd> 全体をコピー<br>
+            編集欄内で有効です。Ctrl+A は行頭移動になります。
+          </div>
+        </details>
         <button type="button" class="clear" id="clear-button">消去</button>
         <button type="button" class="copy" id="copy-button">全体をコピー</button>
       </div>
@@ -240,7 +270,7 @@
           copyButton.textContent = 'コピー済み';
           window.setTimeout(() => { copyButton.textContent = '全体をコピー'; }, 1200);
         } catch {
-          saveStatus.textContent = 'コピーできませんでした。Ctrl+A、Ctrl+Cを使ってください';
+          saveStatus.textContent = 'コピーできませんでした。Ctrl+Shift+A、Ctrl+Cを使ってください';
         }
         editor.focus();
       };
@@ -254,17 +284,117 @@
 
       updateCounts();
 
+      const segmenter = typeof Intl.Segmenter === 'function'
+        ? new Intl.Segmenter('ja', { granularity: 'grapheme' }) : null;
+      const characterOffsets = (text) => {
+        if (segmenter) return [...segmenter.segment(text)].map(part => part.index).concat(text.length);
+        const offsets = [0];
+        for (const character of text) offsets.push(offsets[offsets.length - 1] + character.length);
+        return offsets;
+      };
+      let preferredColumn = null;
+
+      const revealCursor = (position) => {
+        const style = getComputedStyle(editor);
+        const mirror = document.createElement('div');
+        for (const property of ['font', 'lineHeight', 'letterSpacing', 'padding', 'tabSize', 'wordBreak']) {
+          mirror.style[property] = style[property];
+        }
+        Object.assign(mirror.style, {
+          position: 'absolute', visibility: 'hidden', pointerEvents: 'none',
+          top: '0', left: '0', boxSizing: 'border-box',
+          width: `${editor.clientWidth}px`, whiteSpace: 'pre-wrap', overflowWrap: 'break-word',
+        });
+        mirror.textContent = editor.value.slice(0, position);
+        const caret = document.createElement('span');
+        caret.textContent = editor.value.slice(position) || '\u200b';
+        mirror.append(caret);
+        document.body.append(mirror);
+        const top = caret.offsetTop;
+        const bottom = top + parseFloat(style.lineHeight);
+        if (top < editor.scrollTop) editor.scrollTop = top;
+        else if (bottom > editor.scrollTop + editor.clientHeight) {
+          editor.scrollTop = bottom - editor.clientHeight;
+        }
+        mirror.remove();
+      };
+
+      const moveCursor = (key, extend) => {
+        const text = editor.value;
+        const start = editor.selectionStart;
+        const end = editor.selectionEnd;
+        const backward = editor.selectionDirection === 'backward';
+        const position = backward ? start : end;
+        const anchor = backward ? end : start;
+        const lineStart = position === 0 ? 0 : text.lastIndexOf('\n', position - 1) + 1;
+        const nextNewline = text.indexOf('\n', position);
+        const lineEnd = nextNewline < 0 ? text.length : nextNewline;
+        let target = position;
+
+        if (key === 'f' || key === 'b') {
+          const offsets = characterOffsets(text);
+          target = key === 'f'
+            ? (offsets.find(offset => offset > position) ?? text.length)
+            : (offsets.filter(offset => offset < position).pop() ?? 0);
+          if (!extend && start !== end) target = key === 'f' ? end : start;
+        } else if (key === 'a' || key === 'e') {
+          target = key === 'a' ? lineStart : lineEnd;
+        } else {
+          const offsets = characterOffsets(text.slice(lineStart, lineEnd));
+          if (preferredColumn === null) {
+            preferredColumn = offsets.filter(offset => offset < position - lineStart).length;
+          }
+          let targetStart;
+          let targetEnd;
+          if (key === 'p' && lineStart > 0) {
+            targetEnd = lineStart - 1;
+            targetStart = targetEnd === 0 ? 0 : text.lastIndexOf('\n', targetEnd - 1) + 1;
+          } else if (key === 'n' && lineEnd < text.length) {
+            targetStart = lineEnd + 1;
+            const newline = text.indexOf('\n', targetStart);
+            targetEnd = newline < 0 ? text.length : newline;
+          } else {
+            return;
+          }
+          const targetOffsets = characterOffsets(text.slice(targetStart, targetEnd));
+          target = targetStart + targetOffsets[Math.min(preferredColumn, targetOffsets.length - 1)];
+        }
+
+        if (extend) {
+          editor.setSelectionRange(Math.min(anchor, target), Math.max(anchor, target),
+            target < anchor ? 'backward' : 'forward');
+        } else {
+          editor.setSelectionRange(target, target);
+        }
+        revealCursor(target);
+      };
+
       editor.addEventListener('input', () => {
+        preferredColumn = null;
         updateCounts();
         scheduleSave();
       });
 
       editor.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.isComposing) {
+        if (event.isComposing || event.keyCode === 229) return;
+        const key = event.key.toLowerCase();
+        const readlineKey = event.ctrlKey && !event.altKey && !event.metaKey;
+        if (!(readlineKey && (key === 'p' || key === 'n'))) preferredColumn = null;
+
+        if (readlineKey && key === 'a' && event.shiftKey) {
+          event.preventDefault();
+          editor.select();
+        } else if (readlineKey && ['f', 'b', 'a', 'e', 'p', 'n'].includes(key)) {
+          event.preventDefault();
+          moveCursor(key, event.shiftKey);
+        } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
           event.preventDefault();
           copyAll();
         }
       });
+
+      editor.addEventListener('pointerdown', () => { preferredColumn = null; });
+      editor.addEventListener('blur', () => { preferredColumn = null; });
 
       copyButton.addEventListener('click', copyAll);
 
