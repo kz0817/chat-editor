@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="ChatGPTへ貼り付ける文章を書くための、端末内保存対応テキストエディタ">
+  <title>Chat Editor</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f4f5f6;
+      --surface: #ffffff;
+      --text: #202326;
+      --muted: #697078;
+      --line: #d9dde1;
+      --button: #272b2f;
+      --button-text: #ffffff;
+      --focus: #52799c;
+      --danger: #9a3e3e;
+      --shadow: 0 10px 30px rgb(20 27 34 / 7%);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111315;
+        --surface: #181b1e;
+        --text: #e6e8e9;
+        --muted: #9ba2a8;
+        --line: #30353a;
+        --button: #e0e3e5;
+        --button-text: #16181a;
+        --focus: #7fa8c9;
+        --danger: #de8585;
+        --shadow: none;
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { height: 100%; }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Noto Sans JP", "Yu Gothic UI", sans-serif;
+    }
+
+    .app {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      gap: 10px;
+      height: 100dvh;
+      padding: 12px;
+    }
+
+    .toolbar,
+    .statusbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .toolbar { justify-content: space-between; }
+
+    .title {
+      margin: 0;
+      font-size: 0.95rem;
+      font-weight: 650;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+
+    .actions {
+      display: flex;
+      gap: 7px;
+    }
+
+    button {
+      min-height: 36px;
+      padding: 0 13px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface);
+      color: var(--text);
+      font: inherit;
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+
+    button:hover { border-color: var(--muted); }
+
+    button:focus-visible,
+    textarea:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    .copy {
+      border-color: var(--button);
+      background: var(--button);
+      color: var(--button-text);
+      font-weight: 650;
+    }
+
+    .clear { color: var(--danger); }
+
+    textarea {
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      resize: none;
+      padding: clamp(16px, 3vw, 28px);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+      background: var(--surface);
+      color: var(--text);
+      caret-color: var(--focus);
+      font-family: "UDEV Gothic", "Noto Sans Mono CJK JP", "Noto Sans Mono", ui-monospace, monospace;
+      font-size: clamp(1rem, 1.3vw, 1.1rem);
+      line-height: 1.75;
+      tab-size: 2;
+    }
+
+    textarea::placeholder { color: var(--muted); }
+
+    .statusbar {
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 0.8rem;
+      line-height: 1.35;
+    }
+
+    #save-status {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #counts { white-space: nowrap; }
+
+    kbd {
+      padding: 1px 5px;
+      border: 1px solid var(--line);
+      border-bottom-width: 2px;
+      border-radius: 4px;
+      background: var(--surface);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.75rem;
+    }
+
+    @media (max-width: 480px) {
+      .app { padding: 8px; gap: 8px; }
+      .title { display: none; }
+      .toolbar { justify-content: flex-end; }
+      .status-hint { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="toolbar">
+      <h1 class="title">Chat Editor</h1>
+      <div class="actions" aria-label="編集操作">
+        <button type="button" class="clear" id="clear-button">消去</button>
+        <button type="button" class="copy" id="copy-button">全体をコピー</button>
+      </div>
+    </header>
+
+    <textarea
+      id="editor"
+      autofocus
+      spellcheck="true"
+      aria-label="ChatGPTへ貼り付ける文章"
+      placeholder="ここに入力…&#10;&#10;Enterは改行です。Ctrl+Enterで全体をコピーできます。"
+    ></textarea>
+
+    <footer class="statusbar" aria-live="polite">
+      <span id="save-status">このブラウザ内に自動保存</span>
+      <span id="counts"><span class="status-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> コピー　</span><span id="count-values">0文字・1行</span></span>
+    </footer>
+  </main>
+
+  <script>
+    (() => {
+      'use strict';
+
+      const STORAGE_KEY = 'chat-editor-draft-v1';
+      const editor = document.getElementById('editor');
+      const copyButton = document.getElementById('copy-button');
+      const clearButton = document.getElementById('clear-button');
+      const saveStatus = document.getElementById('save-status');
+      const countValues = document.getElementById('count-values');
+      let saveTimer;
+
+      const updateCounts = () => {
+        const characters = Array.from(editor.value).length;
+        const lines = editor.value.split('\n').length;
+        countValues.textContent = `${characters.toLocaleString('ja-JP')}文字・${lines.toLocaleString('ja-JP')}行`;
+      };
+
+      const saveDraft = () => {
+        try {
+          localStorage.setItem(STORAGE_KEY, editor.value);
+          saveStatus.textContent = '保存済み';
+        } catch {
+          saveStatus.textContent = '自動保存できません';
+        }
+      };
+
+      const scheduleSave = () => {
+        saveStatus.textContent = '保存中…';
+        window.clearTimeout(saveTimer);
+        saveTimer = window.setTimeout(saveDraft, 250);
+      };
+
+      const copyAll = async () => {
+        const text = editor.value;
+        if (!text) {
+          saveStatus.textContent = 'コピーする文章がありません';
+          editor.focus();
+          return;
+        }
+
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            editor.focus();
+            editor.select();
+            if (!document.execCommand('copy')) throw new Error('copy failed');
+            editor.setSelectionRange(text.length, text.length);
+          }
+          saveStatus.textContent = '全体をコピーしました';
+          copyButton.textContent = 'コピー済み';
+          window.setTimeout(() => { copyButton.textContent = '全体をコピー'; }, 1200);
+        } catch {
+          saveStatus.textContent = 'コピーできませんでした。Ctrl+A、Ctrl+Cを使ってください';
+        }
+        editor.focus();
+      };
+
+      try {
+        const savedDraft = localStorage.getItem(STORAGE_KEY);
+        if (savedDraft !== null) editor.value = savedDraft;
+      } catch {
+        saveStatus.textContent = '自動保存を利用できません';
+      }
+
+      updateCounts();
+
+      editor.addEventListener('input', () => {
+        updateCounts();
+        scheduleSave();
+      });
+
+      editor.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.isComposing) {
+          event.preventDefault();
+          copyAll();
+        }
+      });
+
+      copyButton.addEventListener('click', copyAll);
+
+      clearButton.addEventListener('click', () => {
+        if (!editor.value || window.confirm('入力中の文章を消去しますか？')) {
+          editor.value = '';
+          saveDraft();
+          updateCounts();
+          editor.focus();
+        }
+      });
+
+      window.addEventListener('pagehide', saveDraft);
+    })();
+  </script>
+</body>
+</html>
