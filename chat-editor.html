@@ -190,9 +190,10 @@
           <div class="key-list">
             <kbd>Ctrl+F</kbd> / <kbd>Ctrl+B</kbd> 次／前の文字<br>
             <kbd>Ctrl+A</kbd> / <kbd>Ctrl+E</kbd> 行頭／行末<br>
-            <kbd>Ctrl+P</kbd> / <kbd>Ctrl+N</kbd> 前／次の行<br>
-            F / B / E / P / N は Shift 併用で範囲選択できます。行は改行で区切ります。<br>
+            <kbd>Ctrl+K</kbd> / <kbd>Ctrl+J</kbd> 前／次の行<br>
+            F / B / E / K / J は Shift 併用で範囲選択できます。行は改行で区切ります。<br>
             <kbd>Ctrl+Shift+A</kbd> 全選択<br>
+            <kbd>Ctrl+M</kbd> 改行<br>
             <kbd>Ctrl+Enter</kbd> 全体をコピー<br>
             編集欄内で有効です。Ctrl+A は行頭移動になります。
           </div>
@@ -346,10 +347,10 @@
           }
           let targetStart;
           let targetEnd;
-          if (key === 'p' && lineStart > 0) {
+          if (key === 'k' && lineStart > 0) {
             targetEnd = lineStart - 1;
             targetStart = targetEnd === 0 ? 0 : text.lastIndexOf('\n', targetEnd - 1) + 1;
-          } else if (key === 'n' && lineEnd < text.length) {
+          } else if (key === 'j' && lineEnd < text.length) {
             targetStart = lineEnd + 1;
             const newline = text.indexOf('\n', targetStart);
             targetEnd = newline < 0 ? text.length : newline;
@@ -379,12 +380,12 @@
         if (event.isComposing || event.keyCode === 229) return;
         const key = event.key.toLowerCase();
         const readlineKey = event.ctrlKey && !event.altKey && !event.metaKey;
-        if (!(readlineKey && (key === 'p' || key === 'n'))) preferredColumn = null;
+        if (!(readlineKey && (key === 'k' || key === 'j'))) preferredColumn = null;
 
         if (readlineKey && key === 'a' && event.shiftKey) {
           event.preventDefault();
           editor.select();
-        } else if (readlineKey && ['f', 'b', 'a', 'e', 'p', 'n'].includes(key)) {
+        } else if (readlineKey && ['f', 'b', 'a', 'e', 'k', 'j'].includes(key)) {
           event.preventDefault();
           moveCursor(key, event.shiftKey);
         } else if (readlineKey && key === 'd' && !event.shiftKey) {
@@ -400,6 +401,13 @@
             editor.dispatchEvent(new Event('input', { bubbles: true }));
           }
           revealCursor(start);
+        } else if (readlineKey && key === 'm' && !event.shiftKey) {
+          event.preventDefault();
+          const start = editor.selectionStart;
+          const end = editor.selectionEnd;
+          editor.setRangeText('\n', start, end, 'end');
+          editor.dispatchEvent(new Event('input', { bubbles: true }));
+          revealCursor(start + 1);
         } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
           event.preventDefault();
           copyAll();
