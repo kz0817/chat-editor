@@ -387,6 +387,19 @@
         } else if (readlineKey && ['f', 'b', 'a', 'e', 'p', 'n'].includes(key)) {
           event.preventDefault();
           moveCursor(key, event.shiftKey);
+        } else if (readlineKey && key === 'd' && !event.shiftKey) {
+          event.preventDefault();
+          const start = editor.selectionStart;
+          const end = editor.selectionEnd === start
+            ? (characterOffsets(editor.value).find(offset => offset > start) ?? start)
+            : editor.selectionEnd;
+          if (start === end) return;
+          editor.setSelectionRange(start, end);
+          if (!document.execCommand('delete')) {
+            editor.setRangeText('', start, end, 'start');
+            editor.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+          revealCursor(start);
         } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
           event.preventDefault();
           copyAll();
